@@ -18,4 +18,4 @@ jobs:
           tools: composer:v2
       - run: composer install --no-interaction --prefer-dist
       - run: composer lint
-      - run: vendor/bin/pest --ci
+      - run: vendor/bin/pest --ci --cache-directory=.pest-cache
