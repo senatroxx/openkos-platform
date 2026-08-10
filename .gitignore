@@ -2,5 +2,6 @@
 /.phpunit.cache/
 /.pest-cache/
 /--cache-result/
+AGENTS.md
 /.env
 /.env.*
