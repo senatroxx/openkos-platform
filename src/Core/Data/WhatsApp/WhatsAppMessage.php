@@ -1,0 +1,13 @@
+<?php
+
+namespace OpenKOS\Core\Data\WhatsApp;
+
+class WhatsAppMessage
+{
+    public function __construct(
+        public readonly string $phone,
+        public readonly string $message,
+        public readonly ?string $sender = null,
+        public readonly ?WhatsAppAttachment $attachment = null,
+    ) {}
+}
