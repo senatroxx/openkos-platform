@@ -4,6 +4,8 @@ namespace OpenKOS\Platform;
 
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
+use OpenKOS\Core\Contracts\PluginDiscovery;
 use OpenKOS\Platform\Dashboard\DashboardRegistry;
 use OpenKOS\Platform\Navigation\NavigationRegistry;
 use OpenKOS\Platform\Notification\NotificationRegistry;
@@ -41,10 +43,25 @@ class PlatformServiceProvider extends ServiceProvider
 
         $manager = $this->app->make(OpenKOSManager::class);
 
+        $pluginClasses = config('platform.plugins', []);
+
+        if (config('platform.discovery.enabled', false)) {
+            if (! $this->app->bound(PluginDiscovery::class)) {
+                throw new InvalidArgumentException(
+                    'Composer plugin discovery is enabled, but no PluginDiscovery implementation is bound.',
+                );
+            }
+
+            $pluginClasses = array_merge(
+                $pluginClasses,
+                $this->app->make(PluginDiscovery::class)->discover(),
+            );
+        }
+
         /** @var array<int, Plugin> $plugins */
         $plugins = array_map(
-            fn (string $class) => $this->app->make($class),
-            config('platform.plugins', []),
+            fn (string $class) => $this->resolvePlugin($class),
+            array_values(array_unique($pluginClasses)),
         );
 
         // Validate core-version compatibility + dependencies, order by dependency.
@@ -85,6 +102,19 @@ class PlatformServiceProvider extends ServiceProvider
         if (is_dir($migrations = $dir.'/database/migrations')) {
             $this->loadMigrationsFrom($migrations);
         }
+    }
+
+    private function resolvePlugin(string $class): Plugin
+    {
+        if (! class_exists($class)) {
+            throw new InvalidArgumentException("Plugin class [{$class}] does not exist.");
+        }
+
+        if (! is_a($class, Plugin::class, true)) {
+            throw new InvalidArgumentException("Plugin class [{$class}] must extend ".Plugin::class.'.');
+        }
+
+        return $this->app->make($class);
     }
 
     private function registerListeners(Plugin $plugin): void

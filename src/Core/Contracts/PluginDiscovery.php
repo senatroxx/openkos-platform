@@ -5,8 +5,7 @@ namespace OpenKOS\Core\Contracts;
 use OpenKOS\Platform\Plugin\Plugin;
 
 /**
- * Seam for future plugin discovery (e.g. composer package scanning).
- * For now plugins are listed explicitly in config/platform.php.
+ * Host-provided seam for discovering external plugin classes.
  */
 interface PluginDiscovery
 {

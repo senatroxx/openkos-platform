@@ -1,5 +1,6 @@
 <?php
 
+use OpenKOS\Core\Contracts\PluginDiscovery;
 use OpenKOS\Platform\Facades\OpenKOS;
 use OpenKOS\Platform\Navigation\NavigationItem;
 use OpenKOS\Platform\OpenKOSManager;
@@ -60,6 +61,29 @@ class FixturePlugin extends Plugin
     }
 }
 
+class DiscoveredPlugin extends Plugin
+{
+    public static int $registerCalls = 0;
+
+    public function manifest(): PluginManifest
+    {
+        return new PluginManifest(id: 'test/discovered', name: 'Discovered', version: '1.0.0');
+    }
+
+    public function register(OpenKOSManager $platform): void
+    {
+        self::$registerCalls++;
+    }
+}
+
+class FixturePluginDiscovery implements PluginDiscovery
+{
+    public function discover(): array
+    {
+        return [DiscoveredPlugin::class];
+    }
+}
+
 it('applies a plugins registrations across every registry on boot', function () {
     config(['platform.plugins' => [FixturePlugin::class]]);
     (new PlatformServiceProvider(app()))->boot();
@@ -77,3 +101,28 @@ it('runs every register() before any boot()', function () {
 
     expect(OrderProbePluginA::$calls)->toBe(['register:a', 'register:b', 'boot:a', 'boot:b']);
 });
+
+it('merges discovered plugins with explicit plugins and de-duplicates classes', function () {
+    DiscoveredPlugin::$registerCalls = 0;
+    config([
+        'platform.plugins' => [DiscoveredPlugin::class],
+        'platform.discovery.enabled' => true,
+    ]);
+    app()->singleton(PluginDiscovery::class, fn () => new FixturePluginDiscovery);
+
+    (new PlatformServiceProvider(app()))->boot();
+
+    expect(DiscoveredPlugin::$registerCalls)->toBe(1);
+});
+
+it('rejects an invalid plugin class before the lifecycle starts', function () {
+    config(['platform.plugins' => [stdClass::class]]);
+
+    (new PlatformServiceProvider(app()))->boot();
+})->throws(InvalidArgumentException::class, 'must extend OpenKOS\\Platform\\Plugin\\Plugin');
+
+it('requires a discovery binding when discovery is enabled', function () {
+    config(['platform.discovery.enabled' => true]);
+
+    (new PlatformServiceProvider(app()))->boot();
+})->throws(InvalidArgumentException::class, 'no PluginDiscovery implementation is bound');
