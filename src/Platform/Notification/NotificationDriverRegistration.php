@@ -23,11 +23,12 @@ final readonly class NotificationDriverRegistration implements Arrayable
         public string $driverClass,
         public string $label,
         public array $config = [],
+        public ?string $laravelMailer = null,
     ) {}
 
     public function toArray(): array
     {
-        // Credentials (config) and class are never exposed to the frontend.
+        // Runtime config, class, and integration metadata are never exposed to the frontend.
         return [
             'name' => $this->name,
             'channel' => $this->channel,
