@@ -65,7 +65,7 @@ class PlatformServiceProvider extends ServiceProvider
         );
 
         // Validate core-version compatibility + dependencies, order by dependency.
-        $plugins = (new PluginLoader)->prepare($plugins, config('platform.version', '0.1.0'));
+        $plugins = (new PluginLoader)->prepare($plugins, config('platform.version', '0.2.0'));
 
         // A plugin's own routes/migrations load by convention (no boilerplate).
         foreach ($plugins as $plugin) {
