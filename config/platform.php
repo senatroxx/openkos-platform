@@ -3,7 +3,7 @@
 use Composer\InstalledVersions;
 
 return [
-    'version' => InstalledVersions::getPrettyVersion('openkos/platform') ?: '0.1.0',
+    'version' => InstalledVersions::getPrettyVersion('openkos/platform') ?: '0.2.0',
     'plugins' => [],
     'discovery' => [
         // Host applications must explicitly opt into external plugin discovery.

@@ -1,7 +1,7 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
     "name": "openkos/platform",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "description": "The OpenKOS platform and plugin SDK.",
     "type": "library",
     "license": "Apache-2.0",

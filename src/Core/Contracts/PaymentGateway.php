@@ -2,18 +2,30 @@
 
 namespace OpenKOS\Core\Contracts;
 
-/**
- * Payment gateway contract for platform plugins. No implementations yet.
- */
+use OpenKOS\Core\Data\Payment\PaymentCreationResult;
+use OpenKOS\Core\Data\Payment\PaymentRequest;
+use OpenKOS\Core\Data\Payment\PaymentWebhookRequest;
+use OpenKOS\Core\Data\Payment\PaymentWebhookResult;
+use OpenKOS\Core\Exceptions\PaymentWebhookVerificationException;
+
 interface PaymentGateway
 {
     public function key(): string;
 
     public function displayName(): string;
 
-    public function createPayment(array $payload): array;
+    /**
+     * Create a provider-side payment attempt for the positive minor-unit amount
+     * and stable OpenKOS reference in the request.
+     */
+    public function createPayment(PaymentRequest $request): PaymentCreationResult;
 
-    public function handleCallback(array $payload): array;
+    /**
+     * Verify and normalize a raw provider callback.
+     *
+     * @throws PaymentWebhookVerificationException when the callback is not trusted
+     */
+    public function handleCallback(PaymentWebhookRequest $request): PaymentWebhookResult;
 
     /**
      * Describe the configuration fields this gateway needs.
