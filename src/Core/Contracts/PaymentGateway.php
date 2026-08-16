@@ -6,6 +6,7 @@ use OpenKOS\Core\Data\Payment\PaymentCreationResult;
 use OpenKOS\Core\Data\Payment\PaymentRequest;
 use OpenKOS\Core\Data\Payment\PaymentWebhookRequest;
 use OpenKOS\Core\Data\Payment\PaymentWebhookResult;
+use OpenKOS\Core\Exceptions\PaymentWebhookPayloadException;
 use OpenKOS\Core\Exceptions\PaymentWebhookVerificationException;
 
 interface PaymentGateway
@@ -24,6 +25,7 @@ interface PaymentGateway
      * Verify and normalize a raw provider callback.
      *
      * @throws PaymentWebhookVerificationException when the callback is not trusted
+     * @throws PaymentWebhookPayloadException when a trusted callback is malformed
      */
     public function handleCallback(PaymentWebhookRequest $request): PaymentWebhookResult;
 
