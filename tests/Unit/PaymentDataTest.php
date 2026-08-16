@@ -8,6 +8,7 @@ use OpenKOS\Core\Data\Payment\PaymentRequest;
 use OpenKOS\Core\Data\Payment\PaymentWebhookRequest;
 use OpenKOS\Core\Data\Payment\PaymentWebhookResult;
 use OpenKOS\Core\Enums\PaymentStatus;
+use OpenKOS\Core\Exceptions\PaymentWebhookPayloadException;
 use OpenKOS\Core\Exceptions\PaymentWebhookVerificationException;
 
 it('normalizes currency and permits zero-valued money', function () {
@@ -83,3 +84,7 @@ it('keeps webhook input independent from the HTTP framework', function () {
 it('uses a dedicated exception for invalid webhook verification', function () {
     throw new PaymentWebhookVerificationException('Webhook signature is invalid.');
 })->throws(PaymentWebhookVerificationException::class, 'signature is invalid');
+
+it('uses a separate exception for authenticated malformed webhook payloads', function () {
+    throw new PaymentWebhookPayloadException('Webhook payload is malformed.');
+})->throws(PaymentWebhookPayloadException::class, 'payload is malformed');
