@@ -4,7 +4,9 @@ use OpenKOS\Core\Data\Payment\CheckoutInstruction;
 use OpenKOS\Core\Data\Payment\CheckoutInstructions;
 use OpenKOS\Core\Data\Payment\Money;
 use OpenKOS\Core\Data\Payment\PaymentCreationResult;
+use OpenKOS\Core\Data\Payment\PaymentProviderResult;
 use OpenKOS\Core\Data\Payment\PaymentRequest;
+use OpenKOS\Core\Data\Payment\PaymentStatusLookupRequest;
 use OpenKOS\Core\Data\Payment\PaymentWebhookRequest;
 use OpenKOS\Core\Data\Payment\PaymentWebhookResult;
 use OpenKOS\Core\Enums\PaymentStatus;
@@ -70,6 +72,34 @@ it('models normalized creation and webhook results', function () {
         ->and($webhook->status)->toBe(PaymentStatus::Settled)
         ->and($webhook->reference)->toBe('attempt-1');
 });
+
+it('models a provider result without requiring a webhook event reference', function () {
+    $result = new PaymentProviderResult(
+        providerReference: 'provider-1',
+        status: PaymentStatus::Pending,
+        reference: 'attempt-1',
+        amount: new Money(150_000, 'IDR'),
+    );
+
+    expect($result->eventReference)->toBeNull()
+        ->and($result->status)->toBe(PaymentStatus::Pending);
+});
+
+it('models provider status lookup requests', function () {
+    $request = new PaymentStatusLookupRequest(
+        providerReference: 'provider-1',
+        reference: 'attempt-1',
+        metadata: ['invoice_id' => 123],
+    );
+
+    expect($request->providerReference)->toBe('provider-1')
+        ->and($request->reference)->toBe('attempt-1')
+        ->and($request->metadata)->toBe(['invoice_id' => 123]);
+});
+
+it('rejects empty provider status lookup references', function () {
+    new PaymentStatusLookupRequest('');
+})->throws(InvalidArgumentException::class, 'Provider payment references cannot be empty.');
 
 it('keeps webhook input independent from the HTTP framework', function () {
     $request = new PaymentWebhookRequest(

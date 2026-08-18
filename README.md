@@ -79,3 +79,9 @@ final class ExampleGateway implements PaymentGateway
 the host application decides when that becomes a canonical OpenKOS payment.
 The other normalized states are `Pending`, `Failed`, `Expired`, and `Canceled`.
 Invalid webhook signatures throw before a normalized payment event is returned.
+
+Gateways that support recovery from an ambiguous checkout creation may also
+implement the optional OpenKOS\Core\Contracts\PaymentGatewayStatusLookup
+contract. Its lookup returns a neutral PaymentProviderResult; the host can
+apply that result through the same idempotent accounting path used by webhook
+results. Gateways without this capability remain fully compatible.
