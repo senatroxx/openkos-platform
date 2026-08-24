@@ -85,3 +85,10 @@ implement the optional OpenKOS\Core\Contracts\PaymentGatewayStatusLookup
 contract. Its lookup returns a neutral PaymentProviderResult; the host can
 apply that result through the same idempotent accounting path used by webhook
 results. Gateways without this capability remain fully compatible.
+
+Gateways may also implement the optional
+`OpenKOS\\Core\\Contracts\\PaymentGatewayCurrencySupport` contract to declare
+the currencies they support. Hosts should treat an absent implementation as
+unknown capability and should not advertise a currency list. The contract
+must return ISO 4217 currency codes and answer support checks without
+performing a payment or changing application state.
