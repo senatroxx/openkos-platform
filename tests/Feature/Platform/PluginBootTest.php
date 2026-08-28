@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\Log;
 use OpenKOS\Core\Contracts\PluginDiscovery;
 use OpenKOS\Platform\Facades\OpenKOS;
 use OpenKOS\Platform\Navigation\NavigationItem;
@@ -76,6 +77,61 @@ class DiscoveredPlugin extends Plugin
     }
 }
 
+class RegisterFailurePlugin extends Plugin
+{
+    public static int $bootCalls = 0;
+
+    public function manifest(): PluginManifest
+    {
+        return new PluginManifest(id: 'test/register-failure', name: 'Register failure', version: '1.2.3');
+    }
+
+    public function register(OpenKOSManager $platform): void
+    {
+        throw new RuntimeException('register failed');
+    }
+
+    public function boot(OpenKOSManager $platform): void
+    {
+        self::$bootCalls++;
+    }
+}
+
+class BootFailurePlugin extends Plugin
+{
+    public function manifest(): PluginManifest
+    {
+        return new PluginManifest(id: 'test/boot-failure', name: 'Boot failure', version: '2.3.4');
+    }
+
+    public function register(OpenKOSManager $platform): void {}
+
+    public function boot(OpenKOSManager $platform): void
+    {
+        throw new RuntimeException('boot failed');
+    }
+}
+
+class PluginAfterFailure extends Plugin
+{
+    public static array $calls = [];
+
+    public function manifest(): PluginManifest
+    {
+        return new PluginManifest(id: 'test/after-failure', name: 'After failure', version: '3.4.5');
+    }
+
+    public function register(OpenKOSManager $platform): void
+    {
+        self::$calls[] = 'register';
+    }
+
+    public function boot(OpenKOSManager $platform): void
+    {
+        self::$calls[] = 'boot';
+    }
+}
+
 class FixturePluginDiscovery implements PluginDiscovery
 {
     public function discover(): array
@@ -126,3 +182,40 @@ it('requires a discovery binding when discovery is enabled', function () {
 
     (new PlatformServiceProvider(app()))->boot();
 })->throws(InvalidArgumentException::class, 'no PluginDiscovery implementation is bound');
+
+it('contains register failures without booting that plugin or blocking later plugins', function () {
+    RegisterFailurePlugin::$bootCalls = 0;
+    PluginAfterFailure::$calls = [];
+    config(['platform.plugins' => [RegisterFailurePlugin::class, PluginAfterFailure::class]]);
+
+    (new PlatformServiceProvider(app()))->boot();
+
+    expect(RegisterFailurePlugin::$bootCalls)->toBe(0)
+        ->and(PluginAfterFailure::$calls)->toBe(['register', 'boot']);
+});
+
+it('contains boot failures without blocking later plugins', function () {
+    PluginAfterFailure::$calls = [];
+    config(['platform.plugins' => [BootFailurePlugin::class, PluginAfterFailure::class]]);
+
+    (new PlatformServiceProvider(app()))->boot();
+
+    expect(PluginAfterFailure::$calls)->toBe(['register', 'boot']);
+});
+
+it('logs lifecycle failures with plugin identity without exception details', function () {
+    Log::spy();
+    config(['platform.plugins' => [RegisterFailurePlugin::class]]);
+
+    (new PlatformServiceProvider(app()))->boot();
+
+    Log::shouldHaveReceived('error')
+        ->once()
+        ->with('Plugin lifecycle failed.', Mockery::on(function (array $context): bool {
+            return $context['plugin_id'] === 'test/register-failure'
+                && $context['plugin_version'] === '1.2.3'
+                && $context['phase'] === 'register'
+                && $context['exception'] === RuntimeException::class
+                && ! array_key_exists('message', $context);
+        }));
+});

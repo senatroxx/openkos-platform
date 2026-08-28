@@ -3,6 +3,7 @@
 namespace OpenKOS\Platform;
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
 use OpenKOS\Core\Contracts\PluginDiscovery;
@@ -17,6 +18,7 @@ use OpenKOS\Platform\Settings\SettingsManager;
 use OpenKOS\Platform\Settings\SettingsRegistry;
 use OpenKOS\Platform\Workspace\WorkspaceRegistry;
 use ReflectionClass;
+use Throwable;
 
 class PlatformServiceProvider extends ServiceProvider
 {
@@ -73,18 +75,62 @@ class PlatformServiceProvider extends ServiceProvider
         }
 
         // Two passes: boot() may rely on every plugin having registered.
+        $failedPlugins = [];
+
         foreach ($plugins as $plugin) {
-            $plugin->register($manager);
+            try {
+                $plugin->register($manager);
+            } catch (Throwable $exception) {
+                $failedPlugins[spl_object_id($plugin)] = true;
+                $this->logPluginLifecycleFailure($plugin, 'register', $exception);
+            }
         }
 
         foreach ($plugins as $plugin) {
-            $plugin->boot($manager);
+            if (isset($failedPlugins[spl_object_id($plugin)])) {
+                continue;
+            }
+
+            try {
+                $plugin->boot($manager);
+            } catch (Throwable $exception) {
+                $failedPlugins[spl_object_id($plugin)] = true;
+                $this->logPluginLifecycleFailure($plugin, 'boot', $exception);
+            }
         }
 
         foreach ($plugins as $plugin) {
-            $this->registerListeners($plugin);
+            if (isset($failedPlugins[spl_object_id($plugin)])) {
+                continue;
+            }
+
+            try {
+                $this->registerListeners($plugin);
+            } catch (Throwable $exception) {
+                $this->logPluginLifecycleFailure($plugin, 'listeners', $exception);
+            }
         }
 
+    }
+
+    private function logPluginLifecycleFailure(Plugin $plugin, string $phase, Throwable $exception): void
+    {
+        $pluginId = get_class($plugin);
+        $version = null;
+
+        try {
+            $manifest = $plugin->manifest();
+            $pluginId = $manifest->id;
+            $version = $manifest->version;
+        } catch (Throwable) {
+        }
+
+        Log::error('Plugin lifecycle failed.', [
+            'plugin_id' => $pluginId,
+            'plugin_version' => $version,
+            'phase' => $phase,
+            'exception' => get_class($exception),
+        ]);
     }
 
     /**
