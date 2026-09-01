@@ -13,7 +13,9 @@ use OpenKOS\Platform\Notification\NotificationRegistry;
 use OpenKOS\Platform\Payment\PaymentRegistry;
 use OpenKOS\Platform\Permission\PermissionRegistry;
 use OpenKOS\Platform\Plugin\Plugin;
+use OpenKOS\Platform\Plugin\PluginLifecycleFailureRegistry;
 use OpenKOS\Platform\Plugin\PluginLoader;
+use OpenKOS\Platform\Plugin\PluginManifest;
 use OpenKOS\Platform\Settings\SettingsManager;
 use OpenKOS\Platform\Settings\SettingsRegistry;
 use OpenKOS\Platform\Workspace\WorkspaceRegistry;
@@ -35,10 +37,14 @@ class PlatformServiceProvider extends ServiceProvider
         $this->app->singleton(PaymentRegistry::class);
         $this->app->singleton(PermissionRegistry::class);
         $this->app->singleton(OpenKOSManager::class);
+        $this->app->singleton(PluginLifecycleFailureRegistry::class);
     }
 
     public function boot(): void
     {
+        $failureRegistry = $this->app->make(PluginLifecycleFailureRegistry::class);
+        $failureRegistry->clear();
+
         $this->publishes([
             __DIR__.'/../../config/platform.php' => config_path('platform.php'),
         ], 'openkos-platform-config');
@@ -61,76 +67,171 @@ class PlatformServiceProvider extends ServiceProvider
         }
 
         /** @var array<int, Plugin> $plugins */
-        $plugins = array_map(
-            fn (string $class) => $this->resolvePlugin($class),
-            array_values(array_unique($pluginClasses)),
-        );
-
-        // Validate core-version compatibility + dependencies, order by dependency.
-        $plugins = (new PluginLoader)->prepare($plugins, config('platform.version', '0.2.0'));
-
-        // A plugin's own routes/migrations load by convention (no boilerplate).
-        foreach ($plugins as $plugin) {
-            $this->loadPluginResources($plugin);
+        $plugins = [];
+        foreach (array_values(array_unique($pluginClasses)) as $class) {
+            try {
+                $plugins[] = $this->resolvePlugin($class);
+            } catch (Throwable $exception) {
+                $this->recordPluginFailure($class, null, 'resolve', $exception);
+            }
         }
 
-        // Two passes: boot() may rely on every plugin having registered.
-        $failedPlugins = [];
+        $prepared = (new PluginLoader)->prepareRecoverably(
+            $plugins,
+            config('platform.version', '0.2.0'),
+        );
+        $plugins = $prepared['plugins'];
+        $manifests = $prepared['manifests'];
+        $failedIds = [];
 
+        foreach ($prepared['failures'] as $failure) {
+            $manifest = $failure['manifest'];
+            if ($manifest !== null) {
+                $failedIds[$manifest->id] = true;
+            }
+
+            $this->recordPluginFailure(
+                get_class($failure['plugin']),
+                $manifest,
+                $failure['phase'],
+                $failure['exception'],
+            );
+        }
+
+        // Load resources immediately before register so failed dependencies
+        // cannot execute dependant plugin code.
         foreach ($plugins as $plugin) {
+            $manifest = $manifests[spl_object_id($plugin)];
+            if ($this->hasFailedDependency($manifest, $failedIds)) {
+                $this->skipPlugin($plugin, $manifest, 'dependency', $failedIds);
+
+                continue;
+            }
+
+            try {
+                $this->loadPluginResources($plugin);
+            } catch (Throwable $exception) {
+                $this->failPlugin($plugin, $manifest, 'resources', $exception, $failedIds);
+
+                continue;
+            }
+
             try {
                 $plugin->register($manager);
             } catch (Throwable $exception) {
-                $failedPlugins[spl_object_id($plugin)] = true;
-                $this->logPluginLifecycleFailure($plugin, 'register', $exception);
+                $this->failPlugin($plugin, $manifest, 'register', $exception, $failedIds);
             }
         }
 
         foreach ($plugins as $plugin) {
-            if (isset($failedPlugins[spl_object_id($plugin)])) {
+            $manifest = $manifests[spl_object_id($plugin)];
+            if (
+                isset($failedIds[$manifest->id])
+                || $this->hasFailedDependency($manifest, $failedIds)
+            ) {
+                if (! isset($failedIds[$manifest->id])) {
+                    $this->skipPlugin($plugin, $manifest, 'dependency', $failedIds);
+                }
+
                 continue;
             }
 
             try {
                 $plugin->boot($manager);
             } catch (Throwable $exception) {
-                $failedPlugins[spl_object_id($plugin)] = true;
-                $this->logPluginLifecycleFailure($plugin, 'boot', $exception);
+                $this->failPlugin($plugin, $manifest, 'boot', $exception, $failedIds);
             }
         }
 
         foreach ($plugins as $plugin) {
-            if (isset($failedPlugins[spl_object_id($plugin)])) {
+            $manifest = $manifests[spl_object_id($plugin)];
+            if (
+                isset($failedIds[$manifest->id])
+                || $this->hasFailedDependency($manifest, $failedIds)
+            ) {
                 continue;
             }
 
             try {
                 $this->registerListeners($plugin);
             } catch (Throwable $exception) {
-                $this->logPluginLifecycleFailure($plugin, 'listeners', $exception);
+                $this->failPlugin($plugin, $manifest, 'listeners', $exception, $failedIds);
+            }
+        }
+    }
+
+    /** @param array<string, bool> $failedIds */
+    private function hasFailedDependency(PluginManifest $manifest, array $failedIds): bool
+    {
+        foreach ($manifest->dependencies as $dependency) {
+            if (isset($failedIds[$dependency])) {
+                return true;
             }
         }
 
+        return false;
     }
 
-    private function logPluginLifecycleFailure(Plugin $plugin, string $phase, Throwable $exception): void
-    {
-        $pluginId = get_class($plugin);
-        $version = null;
+    /** @param array<string, bool> $failedIds */
+    private function failPlugin(
+        Plugin $plugin,
+        PluginManifest $manifest,
+        string $phase,
+        Throwable $exception,
+        array &$failedIds,
+    ): void {
+        $failedIds[$manifest->id] = true;
+        $this->recordPluginFailure(get_class($plugin), $manifest, $phase, $exception);
+    }
 
-        try {
-            $manifest = $plugin->manifest();
-            $pluginId = $manifest->id;
-            $version = $manifest->version;
-        } catch (Throwable) {
-        }
+    /** @param array<string, bool> $failedIds */
+    private function skipPlugin(
+        Plugin $plugin,
+        PluginManifest $manifest,
+        string $phase,
+        array &$failedIds,
+    ): void {
+        $failedIds[$manifest->id] = true;
+        $this->recordPluginFailure(
+            get_class($plugin),
+            $manifest,
+            $phase,
+            new InvalidArgumentException('A plugin dependency failed.'),
+        );
+    }
+
+    private function recordPluginFailure(
+        string $entryClass,
+        ?PluginManifest $manifest,
+        string $phase,
+        Throwable $exception,
+    ): void {
+        $this->app->make(PluginLifecycleFailureRegistry::class)->record(
+            $entryClass,
+            $manifest,
+            $phase,
+            $exception,
+        );
 
         Log::error('Plugin lifecycle failed.', [
-            'plugin_id' => $pluginId,
-            'plugin_version' => $version,
+            'plugin_id' => $manifest?->id ?? $entryClass,
+            'plugin_version' => $manifest?->version,
             'phase' => $phase,
             'exception' => get_class($exception),
         ]);
+    }
+
+    private function resolvePlugin(string $class): Plugin
+    {
+        if (! class_exists($class)) {
+            throw new InvalidArgumentException("Plugin class [{$class}] does not exist.");
+        }
+
+        if (! is_a($class, Plugin::class, true)) {
+            throw new InvalidArgumentException("Plugin class [{$class}] must extend ".Plugin::class.'.');
+        }
+
+        return $this->app->make($class);
     }
 
     /**
@@ -148,19 +249,6 @@ class PlatformServiceProvider extends ServiceProvider
         if (is_dir($migrations = $dir.'/database/migrations')) {
             $this->loadMigrationsFrom($migrations);
         }
-    }
-
-    private function resolvePlugin(string $class): Plugin
-    {
-        if (! class_exists($class)) {
-            throw new InvalidArgumentException("Plugin class [{$class}] does not exist.");
-        }
-
-        if (! is_a($class, Plugin::class, true)) {
-            throw new InvalidArgumentException("Plugin class [{$class}] must extend ".Plugin::class.'.');
-        }
-
-        return $this->app->make($class);
     }
 
     private function registerListeners(Plugin $plugin): void

@@ -7,6 +7,7 @@ use OpenKOS\Platform\Navigation\NavigationItem;
 use OpenKOS\Platform\OpenKOSManager;
 use OpenKOS\Platform\PlatformServiceProvider;
 use OpenKOS\Platform\Plugin\Plugin;
+use OpenKOS\Platform\Plugin\PluginLifecycleFailureRegistry;
 use OpenKOS\Platform\Plugin\PluginManifest;
 
 class OrderProbePluginA extends Plugin
@@ -112,6 +113,81 @@ class BootFailurePlugin extends Plugin
     }
 }
 
+class ConstructorFailurePlugin extends Plugin
+{
+    public function __construct()
+    {
+        throw new RuntimeException('constructor failed');
+    }
+
+    public function manifest(): PluginManifest
+    {
+        return new PluginManifest(id: 'test/constructor-failure', name: 'Constructor failure', version: '1.0.0');
+    }
+
+    public function register(OpenKOSManager $platform): void {}
+}
+
+class ManifestFailurePlugin extends Plugin
+{
+    public function manifest(): PluginManifest
+    {
+        throw new RuntimeException('manifest failed');
+    }
+
+    public function register(OpenKOSManager $platform): void {}
+}
+
+class DependentOnRegisterFailurePlugin extends Plugin
+{
+    public static array $calls = [];
+
+    public function manifest(): PluginManifest
+    {
+        return new PluginManifest(
+            id: 'test/register-dependant',
+            name: 'Register dependant',
+            version: '1.0.0',
+            dependencies: ['test/register-failure'],
+        );
+    }
+
+    public function register(OpenKOSManager $platform): void
+    {
+        self::$calls[] = 'register';
+    }
+
+    public function boot(OpenKOSManager $platform): void
+    {
+        self::$calls[] = 'boot';
+    }
+}
+
+class DependentOnBootFailurePlugin extends Plugin
+{
+    public static array $calls = [];
+
+    public function manifest(): PluginManifest
+    {
+        return new PluginManifest(
+            id: 'test/boot-dependant',
+            name: 'Boot dependant',
+            version: '1.0.0',
+            dependencies: ['test/boot-failure'],
+        );
+    }
+
+    public function register(OpenKOSManager $platform): void
+    {
+        self::$calls[] = 'register';
+    }
+
+    public function boot(OpenKOSManager $platform): void
+    {
+        self::$calls[] = 'boot';
+    }
+}
+
 class PluginAfterFailure extends Plugin
 {
     public static array $calls = [];
@@ -171,11 +247,21 @@ it('merges discovered plugins with explicit plugins and de-duplicates classes', 
     expect(DiscoveredPlugin::$registerCalls)->toBe(1);
 });
 
-it('rejects an invalid plugin class before the lifecycle starts', function () {
+it('skips an invalid plugin class without aborting application boot', function () {
     config(['platform.plugins' => [stdClass::class]]);
 
     (new PlatformServiceProvider(app()))->boot();
-})->throws(InvalidArgumentException::class, 'must extend OpenKOS\\Platform\\Plugin\\Plugin');
+
+    expect(app(PluginLifecycleFailureRegistry::class)->failures())->toMatchArray([
+        [
+            'id' => null,
+            'version' => null,
+            'entry_class' => stdClass::class,
+            'phase' => 'resolve',
+            'exception' => InvalidArgumentException::class,
+        ],
+    ]);
+});
 
 it('requires a discovery binding when discovery is enabled', function () {
     config(['platform.discovery.enabled' => true]);
@@ -194,6 +280,15 @@ it('contains register failures without booting that plugin or blocking later plu
         ->and(PluginAfterFailure::$calls)->toBe(['register', 'boot']);
 });
 
+it('suppresses dependants of a plugin that fails during register', function (): void {
+    DependentOnRegisterFailurePlugin::$calls = [];
+    config(['platform.plugins' => [RegisterFailurePlugin::class, DependentOnRegisterFailurePlugin::class]]);
+
+    (new PlatformServiceProvider(app()))->boot();
+
+    expect(DependentOnRegisterFailurePlugin::$calls)->toBe([]);
+});
+
 it('contains boot failures without blocking later plugins', function () {
     PluginAfterFailure::$calls = [];
     config(['platform.plugins' => [BootFailurePlugin::class, PluginAfterFailure::class]]);
@@ -201,6 +296,25 @@ it('contains boot failures without blocking later plugins', function () {
     (new PlatformServiceProvider(app()))->boot();
 
     expect(PluginAfterFailure::$calls)->toBe(['register', 'boot']);
+});
+
+it('suppresses dependant boot after a dependency fails during boot', function (): void {
+    DependentOnBootFailurePlugin::$calls = [];
+    config(['platform.plugins' => [BootFailurePlugin::class, DependentOnBootFailurePlugin::class]]);
+
+    (new PlatformServiceProvider(app()))->boot();
+
+    expect(DependentOnBootFailurePlugin::$calls)->toBe(['register']);
+});
+
+it('isolates constructor and manifest failures from healthy plugins', function (): void {
+    DiscoveredPlugin::$registerCalls = 0;
+    config(['platform.plugins' => [ConstructorFailurePlugin::class, ManifestFailurePlugin::class, DiscoveredPlugin::class]]);
+
+    (new PlatformServiceProvider(app()))->boot();
+
+    expect(DiscoveredPlugin::$registerCalls)->toBe(1)
+        ->and(app(PluginLifecycleFailureRegistry::class)->failures())->toHaveCount(2);
 });
 
 it('logs lifecycle failures with plugin identity without exception details', function () {

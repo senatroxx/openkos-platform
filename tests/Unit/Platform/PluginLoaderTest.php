@@ -92,4 +92,15 @@ describe('dependency resolution', function () {
     it('throws on a duplicate id', function () {
         (new PluginLoader)->prepare([loaderPlugin('a'), loaderPlugin('a')], '0.1.0');
     })->throws(InvalidArgumentException::class, 'Duplicate plugin id [a].');
+
+    it('keeps unrelated plugins loadable when a dependency is invalid', function (): void {
+        $result = (new PluginLoader)->prepareRecoverably([
+            loaderPlugin('app', ['broken']),
+            loaderPlugin('broken', coreVersion: '^9.0'),
+            loaderPlugin('healthy'),
+        ], '0.1.0');
+
+        expect(loaderIds($result['plugins']))->toBe(['healthy'])
+            ->and($result['failures'])->toHaveCount(2);
+    });
 });
