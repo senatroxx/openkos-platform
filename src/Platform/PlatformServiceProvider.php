@@ -76,10 +76,7 @@ class PlatformServiceProvider extends ServiceProvider
             }
         }
 
-        $prepared = (new PluginLoader)->prepareRecoverably(
-            $plugins,
-            config('platform.version', '0.2.0'),
-        );
+        $prepared = (new PluginLoader)->prepareRecoverably($plugins);
         $plugins = $prepared['plugins'];
         $manifests = $prepared['manifests'];
         $failedIds = [];

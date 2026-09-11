@@ -7,9 +7,8 @@ use InvalidArgumentException;
 use Throwable;
 
 /**
- * Validates plugin manifests against the running core version and their
- * declared dependencies, then returns them ordered so every plugin loads
- * after the plugins it depends on.
+ * Validates plugin manifests against their declared dependencies, then
+ * returns them ordered so every plugin loads after its dependencies.
  */
 class PluginLoader
 {
@@ -17,10 +16,10 @@ class PluginLoader
      * @param  array<int, Plugin>  $plugins
      * @return array<int, Plugin>
      *
-     * @throws InvalidArgumentException on duplicate id, incompatible core
-     *                                  version, missing dependency, or cycle
+     * @throws InvalidArgumentException on duplicate id, missing dependency,
+     *                                  or cycle
      */
-    public function prepare(array $plugins, string $coreVersion): array
+    public function prepare(array $plugins, ?string $legacyCoreVersion = null): array
     {
         $byId = [];
 
@@ -36,12 +35,6 @@ class PluginLoader
 
         foreach ($byId as $id => $plugin) {
             $manifest = $plugin->manifest();
-
-            if (! $this->satisfies($coreVersion, $manifest->coreVersion)) {
-                throw new InvalidArgumentException(
-                    "Plugin [{$id}] requires core {$manifest->coreVersion}, but core is {$coreVersion}.",
-                );
-            }
 
             foreach ($manifest->dependencies as $dependency) {
                 if (! isset($byId[$dependency])) {
@@ -67,7 +60,7 @@ class PluginLoader
      *     failures: array<int, array{plugin: Plugin, manifest: PluginManifest|null, phase: string, exception: Throwable}>
      * }
      */
-    public function prepareRecoverably(array $plugins, string $coreVersion): array
+    public function prepareRecoverably(array $plugins, ?string $legacyCoreVersion = null): array
     {
         $records = [];
         $byId = [];
@@ -122,26 +115,6 @@ class PluginLoader
 
         foreach ($records as $objectId => $record) {
             if ($record['failed']) {
-                continue;
-            }
-
-            $manifest = $record['manifest'];
-
-            try {
-                $compatible = $this->satisfies($coreVersion, $manifest->coreVersion);
-            } catch (Throwable) {
-                $compatible = false;
-            }
-
-            if (! $compatible) {
-                $fail(
-                    $objectId,
-                    'validation',
-                    new InvalidArgumentException(
-                        "Plugin [{$manifest->id}] is incompatible with core {$coreVersion}.",
-                    ),
-                );
-
                 continue;
             }
 
@@ -302,11 +275,7 @@ class PluginLoader
         ];
     }
 
-    /**
-     * Uses Composer's own constraint engine, so a plugin's coreVersion means
-     * exactly what the same constraint means in composer.json (^, ~, ranges,
-     * ||, wildcards, …).
-     */
+    /** @deprecated Composer owns plugin platform compatibility. */
     public function satisfies(string $version, string $constraint): bool
     {
         return $constraint === '' || Semver::satisfies($version, $constraint);

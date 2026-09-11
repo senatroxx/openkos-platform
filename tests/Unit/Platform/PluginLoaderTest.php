@@ -35,37 +35,19 @@ function loaderIds(array $plugins): array
     return array_map(fn (Plugin $p) => $p->manifest()->id, $plugins);
 }
 
-describe('version compatibility', function () {
-    it('accepts wildcard and matching caret/exact constraints', function () {
-        $loader = new PluginLoader;
+describe('legacy compatibility metadata', function () {
+    it('does not gate loading on the deprecated coreVersion field', function () {
+        $prepared = (new PluginLoader)->prepare([loaderPlugin('a', coreVersion: '^9.0')], '0.1.0');
 
-        expect($loader->satisfies('0.1.0', '*'))->toBeTrue()
-            ->and($loader->satisfies('0.1.5', '^0.1'))->toBeTrue()
-            ->and($loader->satisfies('0.1.0', '0.1.0'))->toBeTrue()
-            ->and($loader->satisfies('1.4.0', '^1.2'))->toBeTrue();
+        expect(loaderIds($prepared))->toBe(['a']);
     });
 
-    it('rejects incompatible constraints', function () {
+    it('retains the Composer constraint helper for legacy callers', function () {
         $loader = new PluginLoader;
 
-        expect($loader->satisfies('0.2.0', '^0.1'))->toBeFalse()   // 0.x minor is the boundary
-            ->and($loader->satisfies('0.1.0', '0.2.0'))->toBeFalse()
-            ->and($loader->satisfies('2.0.0', '^1.0'))->toBeFalse();
+        expect($loader->satisfies('0.1.0', '^0.1'))->toBeTrue()
+            ->and($loader->satisfies('0.2.0', '^0.1'))->toBeFalse();
     });
-
-    it('supports the full composer constraint grammar', function () {
-        $loader = new PluginLoader;
-
-        expect($loader->satisfies('1.3.0', '~1.2'))->toBeTrue()
-            ->and($loader->satisfies('1.5.0', '>=1.0 <2.0'))->toBeTrue()
-            ->and($loader->satisfies('2.1.0', '^1.0 || ^2.0'))->toBeTrue()
-            ->and($loader->satisfies('1.9.9', '1.*'))->toBeTrue()
-            ->and($loader->satisfies('2.0.0', '~1.2'))->toBeFalse();
-    });
-
-    it('throws when a plugin requires an incompatible core', function () {
-        (new PluginLoader)->prepare([loaderPlugin('a', coreVersion: '^0.2')], '0.1.0');
-    })->throws(InvalidArgumentException::class, 'Plugin [a] requires core ^0.2, but core is 0.1.0.');
 });
 
 describe('dependency resolution', function () {
@@ -96,7 +78,7 @@ describe('dependency resolution', function () {
     it('keeps unrelated plugins loadable when a dependency is invalid', function (): void {
         $result = (new PluginLoader)->prepareRecoverably([
             loaderPlugin('app', ['broken']),
-            loaderPlugin('broken', coreVersion: '^9.0'),
+            loaderPlugin('broken', ['missing']),
             loaderPlugin('healthy'),
         ], '0.1.0');
 
